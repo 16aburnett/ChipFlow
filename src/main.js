@@ -8,6 +8,7 @@
 import { Graph }     from './graph.js';
 import { Renderer }  from './renderer.js';
 import { Evaluator } from './evaluator.js';
+import { saveGraph, loadGraph } from './persistence.js';
 
 // ── Core objects ───────────────────────────────────────────────────────────────
 
@@ -43,6 +44,16 @@ document.querySelectorAll('[data-add]').forEach(btn => {
     const jitter = () => (Math.random() - 0.5) * 48;
     graph.addNode(type, center.x - 82 + jitter(), center.y - 30 + jitter());
   });
+});
+
+// ── Toolbar: save / load ───────────────────────────────────────────────────────
+
+document.getElementById('btn-save').addEventListener('click', () => {
+  saveGraph(graph);
+});
+
+document.getElementById('btn-load').addEventListener('click', () => {
+  loadGraph(graph).catch(err => alert(`Load failed:\n\n${err.message}`));
 });
 
 // ── Toolbar: run ───────────────────────────────────────────────────────────────

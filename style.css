@@ -79,6 +79,11 @@ button:hover {
   border-color: #7070aa;
 }
 
+.toolbar-file {
+  display: flex;
+  gap: 6px;
+}
+
 #btn-run {
   background: #1e4d2b;
   border-color: #2d7a44;

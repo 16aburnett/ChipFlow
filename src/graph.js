@@ -9,17 +9,19 @@
 
 import { CHIP_TYPES } from './chipTypes.js';
 
-let _counter = 1;
-const uid = () => String(_counter++);
-
 export class Graph {
   constructor() {
+    this._counter = 1;
     /** @type {Map<string, GraphNode>} */
     this.nodes = new Map();
     /** @type {GraphEdge[]} */
     this.edges = [];
     /** @type {Function[]} */
     this._listeners = [];
+  }
+
+  _uid() {
+    return String(this._counter++);
   }
 
   // ── Event system ───────────────────────────────────────────────────────────
@@ -46,7 +48,7 @@ export class Graph {
     if (!def) throw new Error(`Unknown chip type: "${type}"`);
 
     const node = {
-      id:    uid(),
+      id:    this._uid(),
       type,
       x,
       y,
@@ -99,7 +101,7 @@ export class Graph {
     this.edges = this.edges.filter(
       e => !(e.toNode === toNode && e.toPort === toPort),
     );
-    const edge = { id: uid(), fromNode, fromPort, toNode, toPort };
+    const edge = { id: this._uid(), fromNode, fromPort, toNode, toPort };
     this.edges.push(edge);
     this._emit({ type: 'edge-added', edge });
     return edge;
@@ -120,6 +122,27 @@ export class Graph {
   }
 
   // ── Serialisation ──────────────────────────────────────────────────────────
+
+  loadFrom({ nodes, edges }) {
+    for (const id of [...this.nodes.keys()]) this.removeNode(id);
+
+    for (const node of nodes) {
+      const n = { ...node, props: { ...node.props } };
+      this.nodes.set(n.id, n);
+      this._emit({ type: 'node-added', node: n });
+    }
+
+    for (const edge of edges) {
+      const e = { ...edge };
+      this.edges.push(e);
+      this._emit({ type: 'edge-added', edge: e });
+    }
+
+    // Bump counter above all loaded IDs to prevent future collisions
+    const allIds = [...nodes.map(n => n.id), ...edges.map(e => e.id)];
+    const maxId  = Math.max(0, ...allIds.map(id => parseInt(id) || 0));
+    this._counter = maxId + 1;
+  }
 
   serialize() {
     return {
