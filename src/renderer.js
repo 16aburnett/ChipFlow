@@ -372,15 +372,10 @@ export class Renderer {
     group.add(valText);
     group._valText = valText;
 
-    // Double-click: simple prompt-based edit (replace with overlay input later)
+    // Double-click: overlay input for numbers, toggle for booleans
     group.on('dblclick dbltap', () => {
       if (node.type === 'Number') {
-        const raw = prompt('Enter a number:', node.props.value);
-        if (raw === null) return;
-        const parsed = parseFloat(raw);
-        if (!isNaN(parsed)) {
-          this.graph.updateNodeProps(node.id, { value: parsed });
-        }
+        this._showValueEditor(node);
       } else if (node.type === 'Boolean') {
         this.graph.updateNodeProps(node.id, { value: !node.props.value });
       }
@@ -394,6 +389,51 @@ export class Renderer {
     if (group._valText) {
       group._valText.text(String(node.props.value));
     }
+  }
+
+  _showValueEditor(node) {
+    const container = this.stage.container();
+    const rect      = container.getBoundingClientRect();
+    const scale     = this.world.scaleX();
+
+    const sx = rect.left + this.world.x() + node.x * scale;
+    const sy = rect.top  + this.world.y() + (node.y + HEADER_H) * scale;
+
+    const input = document.createElement('input');
+    input.type  = 'text';
+    input.value = String(node.props.value);
+    Object.assign(input.style, {
+      position: 'fixed', left: `${sx}px`, top: `${sy}px`,
+      width: `${CHIP_W * scale}px`, height: `${chipBodyH(node.type) * scale}px`,
+      background: '#162b20', color: '#a8ffc0',
+      border: '2px solid #50c080', borderRadius: '0 0 7px 7px',
+      fontSize: `${20 * scale}px`, fontFamily: 'Consolas, monospace',
+      textAlign: 'center', padding: '0', outline: 'none',
+      zIndex: '1000', boxSizing: 'border-box',
+    });
+    document.body.appendChild(input);
+    input.focus();
+    input.select();
+
+    let done = false;
+    const commit = () => {
+      if (done) return;
+      done = true;
+      const parsed = parseFloat(input.value);
+      if (!isNaN(parsed)) this.graph.updateNodeProps(node.id, { value: parsed });
+      input.remove();
+    };
+    const cancel = () => {
+      if (done) return;
+      done = true;
+      input.remove();
+    };
+
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); commit(); }
+      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+    input.addEventListener('blur', commit);
   }
 
   // ── Port ──────────────────────────────────────────────────────────────────
