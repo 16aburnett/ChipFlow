@@ -1,0 +1,106 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #1a1a2e;
+  color: #e0e0f0;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  overflow: hidden;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────────── */
+
+#toolbar {
+  height: 48px;
+  background: #12122a;
+  border-bottom: 1px solid #2a2a4a;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 16px;
+  flex-shrink: 0;
+  z-index: 10;
+  user-select: none;
+}
+
+.logo {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #a0a0ff;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.toolbar-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolbar-label {
+  font-size: 0.8rem;
+  color: #6060a0;
+  white-space: nowrap;
+}
+
+.toolbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.hint {
+  font-size: 0.75rem;
+  color: #404060;
+  white-space: nowrap;
+}
+
+button {
+  background: #2a2a44;
+  color: #d0d0f0;
+  border: 1px solid #4a4a6a;
+  border-radius: 4px;
+  padding: 5px 12px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+
+button:hover {
+  background: #3a3a5a;
+  border-color: #7070aa;
+}
+
+#btn-run {
+  background: #1e4d2b;
+  border-color: #2d7a44;
+  color: #70e0a0;
+  font-weight: 600;
+}
+
+#btn-run:hover {
+  background: #265e36;
+  border-color: #3d9a58;
+}
+
+/* ── Canvas ──────────────────────────────────────────────────────────────── */
+
+#canvas-container {
+  flex: 1;
+  overflow: hidden;
+  cursor: default;
+  background:
+    radial-gradient(circle, #1e1e36 0%, #14142a 100%);
+  background-image:
+    /* dot-grid */
+    radial-gradient(circle, #2a2a4a 1px, transparent 1px);
+  background-size: 28px 28px;
+}

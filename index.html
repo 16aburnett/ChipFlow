@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChipFlow</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div id="toolbar">
+    <span class="logo">⬡ ChipFlow</span>
+    <div class="toolbar-chips">
+      <span class="toolbar-label">Add chip:</span>
+      <button data-add="Number">Number</button>
+      <button data-add="Add">Add</button>
+      <button data-add="Multiply">Multiply</button>
+      <button data-add="Branch">Branch</button>
+    </div>
+    <div class="toolbar-right">
+      <span class="hint">Scroll: zoom &nbsp;|&nbsp; Drag canvas: pan &nbsp;|&nbsp; Right-click chip: delete &nbsp;|&nbsp; Click wire: delete</span>
+      <button id="btn-run">▶ Run</button>
+    </div>
+  </div>
+
+  <div id="canvas-container"></div>
+
+  <!-- Konva from CDN — must load before our modules -->
+  <script src="https://unpkg.com/konva@9/konva.min.js"></script>
+  <script type="module" src="src/main.js"></script>
+
+</body>
+</html>
