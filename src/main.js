@@ -9,6 +9,7 @@ import { Graph }     from './graph.js';
 import { Renderer }  from './renderer.js';
 import { Evaluator } from './evaluator.js';
 import { saveGraph, loadGraph, setupAutosave, loadAutosave } from './persistence.js';
+import { History } from './history.js';
 
 // ── Core objects ───────────────────────────────────────────────────────────────
 
@@ -32,6 +33,16 @@ if (!loadAutosave(graph)) {
 }
 
 setupAutosave(graph);
+const history = new History(graph);
+
+// ── Undo / redo ────────────────────────────────────────────────────────────────
+
+document.addEventListener('keydown', e => {
+  if (!e.ctrlKey || document.activeElement?.tagName === 'INPUT') return;
+  if (e.key.toLowerCase() !== 'z') return;
+  e.preventDefault();
+  if (e.shiftKey) history.redo(); else history.undo();
+});
 
 // ── Toolbar: add chips ─────────────────────────────────────────────────────────
 
