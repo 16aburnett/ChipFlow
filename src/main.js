@@ -8,7 +8,7 @@
 import { Graph }     from './graph.js';
 import { Renderer }  from './renderer.js';
 import { Evaluator } from './evaluator.js';
-import { saveGraph, loadGraph } from './persistence.js';
+import { saveGraph, loadGraph, setupAutosave, loadAutosave } from './persistence.js';
 
 // ── Core objects ───────────────────────────────────────────────────────────────
 
@@ -17,22 +17,21 @@ const renderer  = new Renderer(graph, 'canvas-container');
 const evaluator = new Evaluator(graph);
 
 // ── Demo graph: (4 + 3) × 2 = 14 ─────────────────────────────────────────────
-//
-// [Number: 4] ──a─┐
-//                  [Add] ──result──a─┐
-// [Number: 3] ──b─┘                  [Multiply] ──result──▶ 14
-//                       [Number: 2] ──────────b─┘
+// Only shown on first visit — autosave takes over after that.
+if (!loadAutosave(graph)) {
+  const n4  = graph.addNode('Number',   80, 100, { value: 4 });
+  const n3  = graph.addNode('Number',   80, 240, { value: 3 });
+  const add = graph.addNode('Add',      310, 165);
+  const n2  = graph.addNode('Number',   310, 320, { value: 2 });
+  const mul = graph.addNode('Multiply', 540, 230);
 
-const n4  = graph.addNode('Number',   80, 100, { value: 4 });
-const n3  = graph.addNode('Number',   80, 240, { value: 3 });
-const add = graph.addNode('Add',      310, 165);
-const n2  = graph.addNode('Number',   310, 320, { value: 2 });
-const mul = graph.addNode('Multiply', 540, 230);
+  graph.addEdge(n4.id,  'value',  add.id, 'a');
+  graph.addEdge(n3.id,  'value',  add.id, 'b');
+  graph.addEdge(add.id, 'result', mul.id, 'a');
+  graph.addEdge(n2.id,  'value',  mul.id, 'b');
+}
 
-graph.addEdge(n4.id,  'value',  add.id, 'a');
-graph.addEdge(n3.id,  'value',  add.id, 'b');
-graph.addEdge(add.id, 'result', mul.id, 'a');
-graph.addEdge(n2.id,  'value',  mul.id, 'b');
+setupAutosave(graph);
 
 // ── Toolbar: add chips ─────────────────────────────────────────────────────────
 

@@ -333,6 +333,10 @@ export class Renderer {
       this.layer.batchDraw();
     });
 
+    group.on('dragend', () => {
+      this.graph.moveNode(node.id, group.x(), group.y());
+    });
+
     // ── Hover highlight ────────────────────────────────────────────────────
     group.on('mouseenter', () => {
       body.stroke('#6a6aaa');
