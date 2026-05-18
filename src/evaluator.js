@@ -8,6 +8,7 @@
  */
 
 import { CHIP_TYPES } from './chipTypes.js';
+import { Heap }       from './heap.js';
 
 export class Evaluator {
   constructor(graph) {
@@ -20,24 +21,21 @@ export class Evaluator {
    */
   evaluate() {
     const { nodes, edges } = this.graph.serialize();
-
-    const order = this._topoSort(nodes, edges);
-    const values = {}; // nodeId → { portName → value }
+    const order  = this._topoSort(nodes, edges);
+    const heap   = new Heap();
+    const values = {};
 
     for (const nodeId of order) {
-      const node  = this.graph.nodes.get(nodeId);
-      const def   = CHIP_TYPES[node.type];
+      const node = this.graph.nodes.get(nodeId);
+      const def  = CHIP_TYPES[node.type];
 
-      // Gather resolved inputs from upstream nodes
       const inputs = {};
       for (const port of def.inputs) {
         const edge = edges.find(e => e.toNode === nodeId && e.toPort === port.name);
-        if (edge) {
-          inputs[port.name] = values[edge.fromNode]?.[edge.fromPort];
-        }
+        if (edge) inputs[port.name] = values[edge.fromNode]?.[edge.fromPort];
       }
 
-      values[nodeId] = def.eval(inputs, node.props);
+      values[nodeId] = def.eval(inputs, node.props, heap);
     }
 
     return values;

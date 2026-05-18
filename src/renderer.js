@@ -21,6 +21,7 @@
  */
 
 import { CHIP_TYPES, CATEGORY_COLORS, DEFAULT_COLORS } from './chipTypes.js';
+import { T, WIRE_STYLE, WIRE_STYLE_DEFAULT, typesCompatible } from './types.js';
 
 // ── Layout constants ───────────────────────────────────────────────────────────
 
@@ -31,11 +32,18 @@ const PORT_PAD     = 10;    // top/bottom padding inside body
 const PORT_R       = 6;     // visible port circle radius
 const PORT_HIT_R   = 11;    // invisible hit-area radius (easier to click)
 
-const WIRE_COLOR        = '#5858a8';
 const WIRE_HOVER_COLOR  = '#8888e8';
 const WIRE_ANIM_COLOR   = '#80c0ff';
 const PORT_DEFAULT_FILL = '#7070bb';
 const PORT_HOVER_FILL   = '#c0c0ff';
+
+function wireStyle(fromNodeId, fromPort, graph) {
+  const node = graph?.nodes.get(fromNodeId);
+  if (!node) return WIRE_STYLE_DEFAULT;
+  const def  = CHIP_TYPES[node.type];
+  const port = def?.outputs.find(p => p.name === fromPort);
+  return (port?.type && WIRE_STYLE[port.type]) ? WIRE_STYLE[port.type] : WIRE_STYLE_DEFAULT;
+}
 
 // ── Geometry helpers ───────────────────────────────────────────────────────────
 
@@ -315,8 +323,8 @@ export class Renderer {
     def.inputs.forEach((port, idx)  => this._addPort(group, node, port, idx, true,  colors));
     def.outputs.forEach((port, idx) => this._addPort(group, node, port, idx, false, colors));
 
-    // ── Special display for value chips ────────────────────────────────────
-    if (node.type === 'Number' || node.type === 'Boolean') {
+    // ── Value display for constant chips ──────────────────────────────────
+    if (def.isConst) {
       this._addValueDisplay(group, node);
     }
 
@@ -356,28 +364,30 @@ export class Renderer {
     return group;
   }
 
-  /** Inline value display + double-click to edit for Number / Boolean chips. */
+  /** Value display + double-click edit for constant chips. */
   _addValueDisplay(group, node) {
+    const def     = CHIP_TYPES[node.type];
+    const outType = def.outputs[0]?.type;
+    const colors  = CATEGORY_COLORS[def.category] ?? DEFAULT_COLORS;
+
     const valText = new Konva.Text({
-      x: 8,
-      y: HEADER_H + PORT_PAD - 2,
+      x: 8, y: HEADER_H + PORT_PAD - 2,
       width: CHIP_W - PORT_R - 16,
       text: String(node.props.value),
       fontSize: 20,
       fontFamily: 'Consolas, monospace',
-      fill: '#a8ffc0',
+      fill: colors.portColor,
       align: 'center',
       listening: false,
     });
     group.add(valText);
     group._valText = valText;
 
-    // Double-click: overlay input for numbers, toggle for booleans
     group.on('dblclick dbltap', () => {
-      if (node.type === 'Number') {
-        this._showValueEditor(node);
-      } else if (node.type === 'Boolean') {
+      if (outType === T.bool) {
         this.graph.updateNodeProps(node.id, { value: !node.props.value });
+      } else {
+        this._showValueEditor(node, outType, colors);
       }
     });
   }
@@ -391,7 +401,7 @@ export class Renderer {
     }
   }
 
-  _showValueEditor(node) {
+  _showValueEditor(node, outType, colors) {
     const container = this.stage.container();
     const rect      = container.getBoundingClientRect();
     const scale     = this.world.scaleX();
@@ -405,8 +415,8 @@ export class Renderer {
     Object.assign(input.style, {
       position: 'fixed', left: `${sx}px`, top: `${sy}px`,
       width: `${CHIP_W * scale}px`, height: `${chipBodyH(node.type) * scale}px`,
-      background: '#162b20', color: '#a8ffc0',
-      border: '2px solid #50c080', borderRadius: '0 0 7px 7px',
+      background: '#111122', color: colors?.portColor ?? '#a8ffc0',
+      border: `2px solid ${colors?.portColor ?? '#50c080'}`, borderRadius: '0 0 7px 7px',
       fontSize: `${20 * scale}px`, fontFamily: 'Consolas, monospace',
       textAlign: 'center', padding: '0', outline: 'none',
       zIndex: '1000', boxSizing: 'border-box',
@@ -415,19 +425,23 @@ export class Renderer {
     input.focus();
     input.select();
 
+    const parse = raw => {
+      if (outType === T.u8)  return Math.max(0, Math.min(255, parseInt(raw) || 0));
+      if (outType === T.i32) return (parseInt(raw) || 0) | 0;
+      if (outType === T.i64) return Math.trunc(parseFloat(raw) || 0);
+      if (outType === T.f32) return Math.fround(parseFloat(raw));
+      return parseFloat(raw);
+    };
+
     let done = false;
     const commit = () => {
       if (done) return;
       done = true;
-      const parsed = parseFloat(input.value);
-      if (!isNaN(parsed)) this.graph.updateNodeProps(node.id, { value: parsed });
+      const val = parse(input.value);
+      if (!isNaN(val)) this.graph.updateNodeProps(node.id, { value: val });
       input.remove();
     };
-    const cancel = () => {
-      if (done) return;
-      done = true;
-      input.remove();
-    };
+    const cancel = () => { if (done) return; done = true; input.remove(); };
 
     input.addEventListener('keydown', e => {
       if (e.key === 'Enter')  { e.preventDefault(); commit(); }
@@ -441,7 +455,9 @@ export class Renderer {
   _addPort(group, node, port, idx, isInput, colors) {
     const relX  = isInput ? 0 : CHIP_W;
     const relY  = portRelY(idx);
-    const portColor = colors.portColor ?? PORT_DEFAULT_FILL;
+    const portColor = (port.type && WIRE_STYLE[port.type])
+      ? WIRE_STYLE[port.type].color
+      : (port.type === 'any' ? '#c0c0c0' : (colors.portColor ?? PORT_DEFAULT_FILL));
 
     // Label
     group.add(new Konva.Text({
@@ -498,7 +514,12 @@ export class Renderer {
     });
 
     hit.on('mouseenter', () => {
-      dot.fill(PORT_HOVER_FILL);
+      if (this._pendingWire) {
+        const ok = this._pendingWireCompatible(node.id, port.name, isInput);
+        dot.fill(ok ? '#60e080' : '#e04040');
+      } else {
+        dot.fill(PORT_HOVER_FILL);
+      }
       dot.radius(PORT_R + 2);
       this.layer.batchDraw();
     });
@@ -516,18 +537,19 @@ export class Renderer {
   _renderEdge(edge) {
     const { x: x1, y: y1 } = this._nodePortWorldPos(edge.fromNode, edge.fromPort, false);
     const { x: x2, y: y2 } = this._nodePortWorldPos(edge.toNode,   edge.toPort,   true);
+    const style = wireStyle(edge.fromNode, edge.fromPort, this.graph);
 
     const path = new Konva.Path({
       data:           bezierPath(x1, y1, x2, y2),
-      stroke:         WIRE_COLOR,
-      strokeWidth:    2.5,
+      stroke:         style.color,
+      strokeWidth:    style.strokeWidth,
       lineCap:        'round',
       listening:      true,
-      hitStrokeWidth: 10,   // fat invisible hit area
+      hitStrokeWidth: 10,
     });
-    path._edgeId = edge.id;
+    path._edgeId    = edge.id;
+    path._baseStyle = style;
 
-    // Click wire → flash red, then delete
     path.on('click', () => {
       path.stroke('#ff5050');
       this.layer.batchDraw();
@@ -536,12 +558,12 @@ export class Renderer {
 
     path.on('mouseenter', () => {
       path.stroke(WIRE_HOVER_COLOR);
-      path.strokeWidth(3);
+      path.strokeWidth(style.strokeWidth + 1);
       this.layer.batchDraw();
     });
     path.on('mouseleave', () => {
-      path.stroke(WIRE_COLOR);
-      path.strokeWidth(2.5);
+      path.stroke(style.color);
+      path.strokeWidth(style.strokeWidth);
       this.layer.batchDraw();
     });
 
@@ -584,10 +606,15 @@ export class Renderer {
 
     this._pendingWire = { nodeId, portName, isInput, x: wx, y: wy };
 
+    const def   = CHIP_TYPES[this.graph.nodes.get(nodeId)?.type];
+    const ports = isInput ? def?.inputs : def?.outputs;
+    const ptype = ports?.find(p => p.name === portName)?.type;
+    const style = (ptype && WIRE_STYLE[ptype]) ? WIRE_STYLE[ptype] : WIRE_STYLE_DEFAULT;
+
     this._tempWirePath = new Konva.Path({
       data:        bezierPath(wx, wy, wx, wy),
-      stroke:      '#4488ff',
-      strokeWidth: 2,
+      stroke:      style.color,
+      strokeWidth: style.strokeWidth,
       dash:        [7, 5],
       listening:   false,
     });
@@ -604,15 +631,24 @@ export class Renderer {
     let fromNode, fromPort, toNode, toPort;
 
     if (!src.isInput && targetIsInput) {
-      // Natural direction: output → input
       fromNode = src.nodeId;    fromPort = src.portName;
       toNode   = targetNodeId;  toPort   = targetPortName;
     } else if (src.isInput && !targetIsInput) {
-      // Reversed drag direction still valid
       fromNode = targetNodeId;  fromPort = targetPortName;
       toNode   = src.nodeId;    toPort   = src.portName;
     } else {
-      return; // output→output or input→input — invalid
+      return;
+    }
+
+    // Type compatibility check
+    const fromDef = CHIP_TYPES[this.graph.nodes.get(fromNode)?.type];
+    const toDef   = CHIP_TYPES[this.graph.nodes.get(toNode)?.type];
+    const fromType = fromDef?.outputs.find(p => p.name === fromPort)?.type;
+    const toType   = toDef?.inputs.find(p => p.name === toPort)?.type;
+
+    if (fromType && toType && toType !== 'any' && !typesCompatible(fromType, toType)) {
+      this._flashIncompatible();
+      return;
     }
 
     this.graph.addEdge(fromNode, fromPort, toNode, toPort);
@@ -626,6 +662,37 @@ export class Renderer {
     }
     for (const g of this._chipShapes.values()) g.draggable(true);
     this.layer.batchDraw();
+  }
+
+  _flashIncompatible() {
+    if (!this._tempWirePath) return;
+    this._tempWirePath.stroke('#ff4444');
+    this.layer.batchDraw();
+    setTimeout(() => this._cancelWire(), 300);
+  }
+
+  _pendingWireCompatible(targetNodeId, targetPortName, targetIsInput) {
+    const src = this._pendingWire;
+    if (!src || src.nodeId === targetNodeId) return false;
+
+    let fromNode, fromPort, toNode, toPort;
+    if (!src.isInput && targetIsInput) {
+      fromNode = src.nodeId;   fromPort = src.portName;
+      toNode   = targetNodeId; toPort   = targetPortName;
+    } else if (src.isInput && !targetIsInput) {
+      fromNode = targetNodeId; fromPort = targetPortName;
+      toNode   = src.nodeId;   toPort   = src.portName;
+    } else {
+      return false;
+    }
+
+    const fromDef  = CHIP_TYPES[this.graph.nodes.get(fromNode)?.type];
+    const toDef    = CHIP_TYPES[this.graph.nodes.get(toNode)?.type];
+    const fromType = fromDef?.outputs.find(p => p.name === fromPort)?.type;
+    const toType   = toDef?.inputs.find(p => p.name === toPort)?.type;
+
+    if (!fromType || !toType || toType === 'any') return true;
+    return typesCompatible(fromType, toType);
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -643,11 +710,11 @@ export class Renderer {
     // Animate wires first
     for (const path of this._wireShapes.values()) {
       path.stroke(WIRE_ANIM_COLOR);
-      path.strokeWidth(3);
+      path.strokeWidth(path._baseStyle.strokeWidth + 1);
       this.layer.batchDraw();
       setTimeout(() => {
-        path.stroke(WIRE_COLOR);
-        path.strokeWidth(2.5);
+        path.stroke(path._baseStyle.color);
+        path.strokeWidth(path._baseStyle.strokeWidth);
         this.layer.batchDraw();
       }, FLASH_MS);
     }

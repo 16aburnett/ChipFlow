@@ -9,7 +9,8 @@ import { Graph }     from './graph.js';
 import { Renderer }  from './renderer.js';
 import { Evaluator } from './evaluator.js';
 import { saveGraph, loadGraph, setupAutosave, loadAutosave } from './persistence.js';
-import { History } from './history.js';
+import { History }   from './history.js';
+import { CHIP_TYPES, CATEGORY_COLORS, DEFAULT_COLORS } from './chipTypes.js';
 
 // ── Core objects ───────────────────────────────────────────────────────────────
 
@@ -44,16 +45,64 @@ document.addEventListener('keydown', e => {
   if (e.shiftKey) history.redo(); else history.undo();
 });
 
-// ── Toolbar: add chips ─────────────────────────────────────────────────────────
+// ── Chip palette ───────────────────────────────────────────────────────────────
 
-document.querySelectorAll('[data-add]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const type   = btn.dataset.add;
-    const center = renderer.viewportCenter();
-    // Small random jitter so repeated clicks don't stack chips perfectly
-    const jitter = () => (Math.random() - 0.5) * 48;
-    graph.addNode(type, center.x - 82 + jitter(), center.y - 30 + jitter());
+const byCategory = {};
+for (const [key, def] of Object.entries(CHIP_TYPES)) {
+  if (def.hidden) continue;
+  (byCategory[def.category] ??= []).push({ key, def });
+}
+
+const palette = document.getElementById('chip-palette');
+
+const CATEGORY_ORDER = ['value'];
+const sortedCategories = [
+  ...CATEGORY_ORDER.filter(c => byCategory[c]),
+  ...Object.keys(byCategory).filter(c => !CATEGORY_ORDER.includes(c)),
+];
+
+for (const category of sortedCategories) {
+  const chips = byCategory[category];
+  const colors = CATEGORY_COLORS[category] ?? DEFAULT_COLORS;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'palette-category';
+
+  const catBtn = document.createElement('button');
+  catBtn.className = 'palette-cat-btn';
+  catBtn.textContent = category;
+  catBtn.style.borderBottomColor = colors.portColor;
+  catBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    document.querySelectorAll('.palette-category.open').forEach(el => {
+      if (el !== wrap) el.classList.remove('open');
+    });
+    wrap.classList.toggle('open');
   });
+
+  const dropdown = document.createElement('div');
+  dropdown.className = 'palette-dropdown';
+
+  for (const { key, def } of chips) {
+    const item = document.createElement('button');
+    item.className = 'palette-chip-btn';
+    item.textContent = def.label;
+    item.addEventListener('click', () => {
+      const center = renderer.viewportCenter();
+      const jitter = () => (Math.random() - 0.5) * 48;
+      graph.addNode(key, center.x - 82 + jitter(), center.y - 30 + jitter());
+      wrap.classList.remove('open');
+    });
+    dropdown.appendChild(item);
+  }
+
+  wrap.appendChild(catBtn);
+  wrap.appendChild(dropdown);
+  palette.appendChild(wrap);
+}
+
+document.addEventListener('click', () => {
+  document.querySelectorAll('.palette-category.open').forEach(el => el.classList.remove('open'));
 });
 
 // ── Toolbar: save / load ───────────────────────────────────────────────────────

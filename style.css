@@ -14,6 +14,60 @@ body {
   flex-direction: column;
 }
 
+/* ── Chip palette ────────────────────────────────────────────────────────── */
+
+#chip-palette {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.palette-category {
+  position: relative;
+}
+
+.palette-cat-btn {
+  border-bottom-width: 2px;
+  border-bottom-style: solid;
+  text-transform: capitalize;
+}
+
+.palette-dropdown {
+  display: none;
+  flex-direction: column;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  background: #16162e;
+  border: 1px solid #3a3a5a;
+  border-radius: 5px;
+  padding: 4px;
+  z-index: 100;
+  min-width: 150px;
+  max-height: 320px;
+  overflow-y: auto;
+  gap: 2px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+
+.palette-category.open .palette-dropdown {
+  display: flex;
+}
+
+.palette-chip-btn {
+  width: 100%;
+  text-align: left;
+  padding: 5px 10px;
+  white-space: nowrap;
+  border-color: transparent;
+  background: transparent;
+}
+
+.palette-chip-btn:hover {
+  background: #2a2a4a;
+  border-color: transparent;
+}
+
 /* ── Toolbar ─────────────────────────────────────────────────────────────── */
 
 #toolbar {
