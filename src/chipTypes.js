@@ -246,6 +246,16 @@ export const CHIP_TYPES = {
     eval(i, _p, heap) { heap.storeU8(i.ptr + i.offset, i.value ?? 0); return { ptr: i.ptr }; },
   },
 
+  // ── I/O ───────────────────────────────────────────────────────────────────
+
+  Print: {
+    label: 'Print', category: 'io',
+    inputs:  [{ name: 'value', type: 'any' }],
+    outputs: [],
+    defaultProps: {},
+    eval(inputs, _p, _h, out) { out.push(String(inputs.value ?? '')); return {}; },
+  },
+
 };
 
 // ── Colour palette per category ───────────────────────────────────────────────
@@ -259,6 +269,7 @@ export const CATEGORY_COLORS = {
   bitwise: { header: '#3a4a10', body: '#202808', portColor: '#90c030' },
   cast:    { header: '#4a3a3a', body: '#2a2020', portColor: '#c08080' },
   memory:  { header: '#6a3010', body: '#3a1a08', portColor: '#e07030' },
+  io:      { header: '#4a1a3a', body: '#2a0e22', portColor: '#e040b0' },
 };
 
 export const DEFAULT_COLORS = { header: '#3a3a5a', body: '#22223a', portColor: '#8080cc' };

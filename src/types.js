@@ -42,6 +42,7 @@ export const WIRE_STYLE_DEFAULT = { color: '#5858a8', strokeWidth: 2.5 };
 
 export function typesCompatible(from, to) {
   if (from === to) return true;
+  if (to === 'any' || from === 'any') return true;
   // i32 ↔ f32 and i64 ↔ f64 are the only implicit coercions allowed
   if ((from === T.i32 && to === T.f32) || (from === T.f32 && to === T.i32)) return true;
   if ((from === T.i64 && to === T.f64) || (from === T.f64 && to === T.i64)) return true;

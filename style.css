@@ -155,6 +155,7 @@ button:hover {
 #canvas-container {
   flex: 1;
   overflow: hidden;
+  min-height: 0;
   cursor: default;
   background:
     radial-gradient(circle, #1e1e36 0%, #14142a 100%);
@@ -162,4 +163,65 @@ button:hover {
     /* dot-grid */
     radial-gradient(circle, #2a2a4a 1px, transparent 1px);
   background-size: 28px 28px;
+}
+
+/* ── Output panel ────────────────────────────────────────────────────────── */
+
+#output-panel {
+  flex-shrink: 0;
+  background: #0e0e20;
+  border-top: 1px solid #2a2a4a;
+  display: flex;
+  flex-direction: column;
+  height: 0;
+  overflow: hidden;
+}
+
+#output-panel.open {
+  height: 180px;
+}
+
+#output-resize {
+  height: 5px;
+  cursor: ns-resize;
+  flex-shrink: 0;
+}
+
+#output-resize:hover {
+  background: #3a3a6a;
+}
+
+#output-header {
+  display: flex;
+  align-items: center;
+  padding: 3px 10px;
+  background: #12122a;
+  border-bottom: 1px solid #2a2a4a;
+  font-size: 0.78rem;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+#output-header > span {
+  font-weight: 600;
+  color: #e040b0;
+  flex: 1;
+}
+
+#output-header button {
+  padding: 2px 8px;
+  font-size: 0.75rem;
+}
+
+#output-lines {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 12px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 0.82rem;
+  line-height: 1.7;
+}
+
+.output-line {
+  color: #b0e8c8;
 }

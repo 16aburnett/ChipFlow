@@ -115,20 +115,62 @@ document.getElementById('btn-load').addEventListener('click', () => {
   loadGraph(graph).catch(err => alert(`Load failed:\n\n${err.message}`));
 });
 
+// ── Output panel ───────────────────────────────────────────────────────────────
+
+const outputPanel  = document.getElementById('output-panel');
+const outputLines  = document.getElementById('output-lines');
+const outputResize = document.getElementById('output-resize');
+let panelHeight = 180;
+
+function openPanel()  {
+  outputPanel.style.height = panelHeight + 'px';
+  document.getElementById('btn-output-toggle').textContent = '▾';
+}
+function closePanel() {
+  outputPanel.style.height = '0';
+  document.getElementById('btn-output-toggle').textContent = '▴';
+}
+
+document.getElementById('btn-output-toggle').addEventListener('click', () => {
+  if (outputPanel.offsetHeight > 0) closePanel(); else openPanel();
+});
+
+document.getElementById('btn-output-clear').addEventListener('click', () => {
+  outputLines.innerHTML = '';
+});
+
+let resizing = false, resizeStartY = 0, resizeStartH = 0;
+outputResize.addEventListener('mousedown', e => {
+  resizing = true;
+  resizeStartY = e.clientY;
+  resizeStartH = outputPanel.offsetHeight;
+  e.preventDefault();
+});
+document.addEventListener('mousemove', e => {
+  if (!resizing) return;
+  panelHeight = Math.max(60, Math.min(600, resizeStartH + (resizeStartY - e.clientY)));
+  outputPanel.style.height = panelHeight + 'px';
+});
+document.addEventListener('mouseup', () => { resizing = false; });
+
 // ── Toolbar: run ───────────────────────────────────────────────────────────────
 
 document.getElementById('btn-run').addEventListener('click', () => {
   try {
-    const results = evaluator.evaluate();
-    renderer.showEvalResults(results);
+    const { values, output } = evaluator.evaluate();
+    renderer.showEvalResults(values);
 
-    // Also log the leaf output values to the console in a friendly format
-    const summary = {};
-    for (const [nodeId, ports] of Object.entries(results)) {
-      const node = graph.nodes.get(nodeId);
-      summary[`${node.type}[${nodeId}]`] = ports;
+    outputLines.innerHTML = '';
+    if (output.length > 0) {
+      for (const line of output) {
+        const div = document.createElement('div');
+        div.className = 'output-line';
+        div.textContent = line;
+        outputLines.appendChild(div);
+      }
+      openPanel();
+      outputLines.scrollTop = outputLines.scrollHeight;
     }
-    console.table(summary);
   } catch (err) {
     alert(`Evaluation error:\n\n${err.message}`);
   }

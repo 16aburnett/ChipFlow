@@ -24,6 +24,7 @@ export class Evaluator {
     const order  = this._topoSort(nodes, edges);
     const heap   = new Heap();
     const values = {};
+    const output = [];
 
     for (const nodeId of order) {
       const node = this.graph.nodes.get(nodeId);
@@ -35,10 +36,10 @@ export class Evaluator {
         if (edge) inputs[port.name] = values[edge.fromNode]?.[edge.fromPort];
       }
 
-      values[nodeId] = def.eval(inputs, node.props, heap);
+      values[nodeId] = def.eval(inputs, node.props, heap, output);
     }
 
-    return values;
+    return { values, output };
   }
 
   // ── Kahn's algorithm topological sort ─────────────────────────────────────
