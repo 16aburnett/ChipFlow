@@ -44,15 +44,13 @@ export class Graph {
    * @param {object} props - initial prop overrides (e.g. { value: 42 })
    */
   addNode(type, x, y, props = {}) {
-    const def = CHIP_TYPES[type];
-    if (!def) throw new Error(`Unknown chip type: "${type}"`);
-
+    const def  = CHIP_TYPES[type];   // may be undefined for custom chip types
     const node = {
       id:    this._uid(),
       type,
       x,
       y,
-      props: { ...def.defaultProps, ...props },
+      props: { ...(def?.defaultProps ?? {}), ...props },
     };
 
     this.nodes.set(node.id, node);

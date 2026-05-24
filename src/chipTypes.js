@@ -256,6 +256,28 @@ export const CHIP_TYPES = {
     eval(inputs, _p, _h, out) { out.push(String(inputs.value ?? '')); return {}; },
   },
 
+  // ── Custom chip interface ─────────────────────────────────────────────────
+
+  ChipIn: {
+    label: 'in', category: 'interface',
+    inputs:  [],
+    outputs: [{ name: 'value', type: 'any' }],
+    defaultProps: { name: 'in' },
+    titleFromProps: 'name',
+    isRenameable: true,
+    eval(_i, props) { return { value: props._value ?? null }; },
+  },
+
+  ChipOut: {
+    label: 'out', category: 'interface',
+    inputs:  [{ name: 'value', type: 'any' }],
+    outputs: [],
+    defaultProps: { name: 'out' },
+    titleFromProps: 'name',
+    isRenameable: true,
+    eval(inputs) { return { _out: inputs.value ?? null }; },
+  },
+
 };
 
 // ── Colour palette per category ───────────────────────────────────────────────
@@ -269,7 +291,9 @@ export const CATEGORY_COLORS = {
   bitwise: { header: '#3a4a10', body: '#202808', portColor: '#90c030' },
   cast:    { header: '#4a3a3a', body: '#2a2020', portColor: '#c08080' },
   memory:  { header: '#6a3010', body: '#3a1a08', portColor: '#e07030' },
-  io:      { header: '#4a1a3a', body: '#2a0e22', portColor: '#e040b0' },
+  io:        { header: '#4a1a3a', body: '#2a0e22', portColor: '#e040b0' },
+  interface: { header: '#2a2a5a', body: '#16163a', portColor: '#a0a0ff' },
+  custom:    { header: '#3a2a4a', body: '#221830', portColor: '#c080e0' },
 };
 
 export const DEFAULT_COLORS = { header: '#3a3a5a', body: '#22223a', portColor: '#8080cc' };

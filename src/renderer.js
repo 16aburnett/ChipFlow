@@ -1,90 +1,40 @@
-/**
- * renderer.js
- * Konva-based renderer for ChipFlow.
- *
- * Architecture
- * ────────────
- *   Stage
- *   └─ layer
- *      └─ worldGroup  ← zoomed + panned as a unit
- *         ├─ wireGroup  (wires render behind chips)
- *         └─ chipGroup  (chip Konva.Groups on top)
- *
- * Coordinate spaces
- * ─────────────────
- *   Screen space  — raw pixel position on the <canvas> element
- *   World space   — the logical graph coordinate system
- *   screenToWorld() converts between them.
- *   All graph node x/y values are in world space.
- *   Chip Konva.Groups live inside worldGroup, so their Konva position IS world space.
- *   Wire paths are also in world space.
- */
-
 import { CHIP_TYPES, CATEGORY_COLORS, DEFAULT_COLORS } from './chipTypes.js';
 import { T, WIRE_STYLE, WIRE_STYLE_DEFAULT, typesCompatible } from './types.js';
 
 // ── Layout constants ───────────────────────────────────────────────────────────
 
-const CHIP_W       = 164;   // fixed chip width (px, world space)
-const HEADER_H     = 28;    // title bar height
-const PORT_ROW_H   = 26;    // vertical spacing per port row
-const PORT_PAD     = 10;    // top/bottom padding inside body
-const PORT_R       = 6;     // visible port circle radius
-const PORT_HIT_R   = 11;    // invisible hit-area radius (easier to click)
+const CHIP_W      = 164;
+const HEADER_H    = 28;
+const PORT_ROW_H  = 26;
+const PORT_PAD    = 10;
+const PORT_R      = 6;
+const PORT_HIT_R  = 11;
 
 const WIRE_HOVER_COLOR  = '#8888e8';
 const WIRE_ANIM_COLOR   = '#80c0ff';
-const PORT_DEFAULT_FILL = '#7070bb';
 const PORT_HOVER_FILL   = '#c0c0ff';
 
-function wireStyle(fromNodeId, fromPort, graph) {
-  const node = graph?.nodes.get(fromNodeId);
-  if (!node) return WIRE_STYLE_DEFAULT;
-  const def  = CHIP_TYPES[node.type];
-  const port = def?.outputs.find(p => p.name === fromPort);
-  return (port?.type && WIRE_STYLE[port.type]) ? WIRE_STYLE[port.type] : WIRE_STYLE_DEFAULT;
-}
-
-// ── Geometry helpers ───────────────────────────────────────────────────────────
-
-/** Total height of a chip's body section (below header). */
-function chipBodyH(type) {
-  const def  = CHIP_TYPES[type];
+function chipBodyH(def) {
   const rows = Math.max(def.inputs.length, def.outputs.length, 1);
   return PORT_PAD + rows * PORT_ROW_H + PORT_PAD;
 }
 
-/** Total chip height. */
-function chipH(type) {
-  return HEADER_H + chipBodyH(type);
+function chipH(def) { return HEADER_H + chipBodyH(def); }
+
+function portRelY(idx) { return HEADER_H + PORT_PAD + idx * PORT_ROW_H + PORT_ROW_H / 2; }
+
+function fmtValue(v) {
+  if (v === null || v === undefined) return 'null';
+  const s = String(v);
+  return s.length > 18 ? s.slice(0, 16) + '…' : s;
 }
 
-/**
- * Y offset of a port relative to the chip group's top-left (0,0).
- * Left (input) and right (output) ports at the same index share a Y so
- * they appear horizontally aligned.
- */
-function portRelY(portIndex) {
-  return HEADER_H + PORT_PAD + portIndex * PORT_ROW_H + PORT_ROW_H / 2;
-}
-
-/**
- * World-space position of a port, given the node's current position.
- */
-function portWorldPos(node, portName, isInput) {
-  const def   = CHIP_TYPES[node.type];
+function portWorldPos(node, portName, isInput, def) {
   const ports = isInput ? def.inputs : def.outputs;
   const idx   = ports.findIndex(p => p.name === portName);
-  return {
-    x: isInput ? node.x : node.x + CHIP_W,
-    y: node.y + portRelY(idx),
-  };
+  return { x: isInput ? node.x : node.x + CHIP_W, y: node.y + portRelY(idx) };
 }
 
-/**
- * Cubic bezier SVG path string between two world-space points.
- * Control points pull horizontally so wires make a natural S-curve.
- */
 function bezierPath(x1, y1, x2, y2) {
   const dx = Math.max(Math.abs(x2 - x1) * 0.55, 60);
   return `M ${x1} ${y1} C ${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}`;
@@ -93,23 +43,17 @@ function bezierPath(x1, y1, x2, y2) {
 // ── Renderer ───────────────────────────────────────────────────────────────────
 
 export class Renderer {
-  constructor(graph, containerId) {
-    this.graph = graph;
+  constructor(graph, containerId, library = null) {
+    this.graph   = graph;
+    this.library = library;
 
-    /** @type {Map<string, Konva.Group>}  nodeId → Konva chip group */
-    this._chipShapes = new Map();
-    /** @type {Map<string, Konva.Path>}   edgeId → Konva wire path  */
-    this._wireShapes = new Map();
+    this._chipShapes   = new Map();
+    this._wireShapes   = new Map();
+    this._pendingWire  = null;
+    this._tempWirePath = null;
+    this._isPanning    = false;
+    this._panOrigin    = null;
 
-    // Wire drawing state
-    this._pendingWire  = null;   // { nodeId, portName, isInput, x, y }
-    this._tempWirePath = null;   // temporary Konva.Path while dragging
-
-    // Pan state
-    this._isPanning  = false;
-    this._panOrigin  = null;
-
-    // ── Build Konva stage ──────────────────────────────────────────────────
     const container = document.getElementById(containerId);
 
     this.stage = new Konva.Stage({
@@ -121,7 +65,6 @@ export class Renderer {
     this.layer = new Konva.Layer();
     this.stage.add(this.layer);
 
-    // worldGroup: everything inside here zooms/pans together
     this.world = new Konva.Group();
     this.layer.add(this.world);
 
@@ -130,54 +73,84 @@ export class Renderer {
     this.world.add(this.wireGroup);
     this.world.add(this.chipGroup);
 
-    // ── Wire everything up ────────────────────────────────────────────────
     this._setupZoomPan();
     this._setupWireDrawing();
     this._listenToGraph();
     this._setupResize(container);
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Setup
-  // ────────────────────────────────────────────────────────────────────────────
+  getViewState() {
+    return { position: this.world.position(), scale: this.world.scale() };
+  }
+
+  switchGraph(newGraph, savedState = null) {
+    this.chipGroup.destroyChildren();
+    this.wireGroup.destroyChildren();
+    this._chipShapes.clear();
+    this._wireShapes.clear();
+    if (this._tempWirePath) { this._tempWirePath.destroy(); this._tempWirePath = null; }
+    this._pendingWire = null;
+
+    this.graph = newGraph;
+    this._listenToGraph();
+
+    const { nodes, edges } = newGraph.serialize();
+    for (const node of nodes) this._renderNode(node);
+    for (const edge of edges) this._renderEdge(edge);
+
+    if (savedState) {
+      this.world.position(savedState.position);
+      this.world.scale(savedState.scale);
+    } else {
+      this.world.position({ x: 0, y: 0 });
+      this.world.scale({ x: 1, y: 1 });
+    }
+
+    this.layer.batchDraw();
+  }
+
+  _getDef(type) {
+    if (CHIP_TYPES[type]) return CHIP_TYPES[type];
+    if (this.library?.has(type)) return this.library.getInterface(type);
+    return { label: type, category: 'custom', inputs: [], outputs: [], defaultProps: {}, isCustom: true };
+  }
+
+  _wireStyle(fromNodeId, fromPort) {
+    const node = this.graph?.nodes.get(fromNodeId);
+    if (!node) return WIRE_STYLE_DEFAULT;
+    const def  = this._getDef(node.type);
+    const port = def?.outputs.find(p => p.name === fromPort);
+    return (port?.type && WIRE_STYLE[port.type]) ? WIRE_STYLE[port.type] : WIRE_STYLE_DEFAULT;
+  }
+
+  // ── Setup ──────────────────────────────────────────────────────────────────────
 
   _setupZoomPan() {
     const { stage, world } = this;
 
-    // Scroll wheel → zoom, centred on the mouse pointer
     stage.on('wheel', e => {
       e.evt.preventDefault();
-
       const oldScale = world.scaleX();
       const pointer  = stage.getPointerPosition();
-
-      // Where in world-space does the pointer currently sit?
-      const mouseAt = {
+      const mouseAt  = {
         x: (pointer.x - world.x()) / oldScale,
         y: (pointer.y - world.y()) / oldScale,
       };
-
       const factor   = e.evt.deltaY < 0 ? 1.1 : 0.9;
       const newScale = Math.min(Math.max(oldScale * factor, 0.08), 6);
-
       world.scale({ x: newScale, y: newScale });
       world.position({
         x: pointer.x - mouseAt.x * newScale,
         y: pointer.y - mouseAt.y * newScale,
       });
-
       this.layer.batchDraw();
     });
 
-    // Drag on empty canvas → pan
     stage.on('mousedown', e => {
       if (e.target !== stage) return;
       this._isPanning = true;
       const pos = stage.getPointerPosition();
-      this._panOrigin = {
-        sx: pos.x, sy: pos.y,
-        wx: world.x(), wy: world.y(),
-      };
+      this._panOrigin = { sx: pos.x, sy: pos.y, wx: world.x(), wy: world.y() };
       stage.container().style.cursor = 'grabbing';
     });
 
@@ -196,23 +169,17 @@ export class Renderer {
         this._isPanning = false;
         stage.container().style.cursor = 'default';
       }
-      // Cancel any wire-in-progress if released on empty canvas
-      if (this._pendingWire) {
-        this._cancelWire();
-      }
+      if (this._pendingWire) this._cancelWire();
     });
   }
 
   _setupWireDrawing() {
-    // Update the temp wire endpoint as the mouse moves
     this.stage.on('mousemove', () => {
       if (!this._pendingWire || !this._tempWirePath) return;
-
       const rawPos = this.stage.getPointerPosition();
       const scale  = this.world.scaleX();
       const wx     = (rawPos.x - this.world.x()) / scale;
       const wy     = (rawPos.y - this.world.y()) / scale;
-
       const { x: sx, y: sy } = this._pendingWire;
       this._tempWirePath.data(bezierPath(sx, sy, wx, wy));
       this.layer.batchDraw();
@@ -220,35 +187,17 @@ export class Renderer {
   }
 
   _listenToGraph() {
+    const token = {};          // unique object — becomes stale when _listenToGraph is called again
+    this._listenToken = token;
     this.graph.on(event => {
+      if (this._listenToken !== token) return;  // stale listener
       switch (event.type) {
-        case 'node-added':
-          this._renderNode(event.node);
-          break;
-
-        case 'node-moved':
-          // Konva group position is kept in sync by the dragmove handler;
-          // this branch handles programmatic moves.
-          this._syncChipPosition(event.node);
-          this._updateEdgesForNode(event.node.id);
-          break;
-
-        case 'node-updated':
-          this._refreshChipDisplay(event.node);
-          break;
-
-        case 'node-removed':
-          this._removeChipShape(event.id);
-          for (const e of event.removedEdges) this._removeWireShape(e.id);
-          break;
-
-        case 'edge-added':
-          this._renderEdge(event.edge);
-          break;
-
-        case 'edge-removed':
-          this._removeWireShape(event.id);
-          break;
+        case 'node-added':   this._renderNode(event.node); break;
+        case 'node-moved':   this._syncChipPosition(event.node); this._updateEdgesForNode(event.node.id); break;
+        case 'node-updated': this._refreshChipDisplay(event.node); break;
+        case 'node-removed': this._removeChipShape(event.id); for (const e of event.removedEdges) this._removeWireShape(e.id); break;
+        case 'edge-added':   this._renderEdge(event.edge); break;
+        case 'edge-removed': this._removeWireShape(event.id); break;
       }
       this.layer.batchDraw();
     });
@@ -262,9 +211,7 @@ export class Renderer {
     });
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Node (chip) rendering
-  // ────────────────────────────────────────────────────────────────────────────
+  // ── Node (chip) rendering ──────────────────────────────────────────────────────
 
   _renderNode(node) {
     const group = this._buildChipGroup(node);
@@ -273,89 +220,61 @@ export class Renderer {
   }
 
   _buildChipGroup(node) {
-    const def    = CHIP_TYPES[node.type];
+    const def    = this._getDef(node.type);
     const colors = CATEGORY_COLORS[def.category] ?? DEFAULT_COLORS;
-    const totalH = chipH(node.type);
+    const totalH = chipH(def);
+    const title  = def.titleFromProps
+      ? (node.props[def.titleFromProps] || def.label)
+      : def.label;
 
     const group = new Konva.Group({ x: node.x, y: node.y, draggable: true });
     group._chipNodeId = node.id;
 
-    // ── Drop shadow ────────────────────────────────────────────────────────
     group.add(new Konva.Rect({
-      x: 4, y: 4,
-      width: CHIP_W, height: totalH,
-      cornerRadius: 7,
-      fill: 'rgba(0,0,0,0.45)',
-      listening: false,
+      x: 4, y: 4, width: CHIP_W, height: totalH,
+      cornerRadius: 7, fill: 'rgba(0,0,0,0.45)', listening: false,
     }));
 
-    // ── Body ───────────────────────────────────────────────────────────────
     const body = new Konva.Rect({
-      width: CHIP_W, height: totalH,
-      cornerRadius: 7,
-      fill: colors.body,
-      stroke: '#3a3a6a',
-      strokeWidth: 1.5,
+      width: CHIP_W, height: totalH, cornerRadius: 7,
+      fill: colors.body, stroke: '#3a3a6a', strokeWidth: 1.5,
     });
     group.add(body);
     group._body = body;
 
-    // ── Header ─────────────────────────────────────────────────────────────
     group.add(new Konva.Rect({
-      width: CHIP_W, height: HEADER_H,
-      cornerRadius: [7, 7, 0, 0],
-      fill: colors.header,
-      listening: false,
+      width: CHIP_W, height: HEADER_H, cornerRadius: [7, 7, 0, 0],
+      fill: colors.header, listening: false,
     }));
 
-    // ── Title ──────────────────────────────────────────────────────────────
-    group.add(new Konva.Text({
-      x: 10, y: 7,
-      text: def.label,
-      fontSize: 12,
-      fontFamily: 'Segoe UI, system-ui, sans-serif',
-      fill: '#ffffff',
-      fontStyle: 'bold',
-      listening: false,
-    }));
+    const titleText = new Konva.Text({
+      x: 10, y: 7, text: title,
+      fontSize: 12, fontFamily: 'Segoe UI, system-ui, sans-serif',
+      fill: '#ffffff', fontStyle: 'bold', listening: false,
+    });
+    group.add(titleText);
+    group._titleText = titleText;
 
-    // ── Ports ──────────────────────────────────────────────────────────────
-    def.inputs.forEach((port, idx)  => this._addPort(group, node, port, idx, true,  colors));
-    def.outputs.forEach((port, idx) => this._addPort(group, node, port, idx, false, colors));
+    def.inputs.forEach((port, idx)  => this._addPort(group, node, port, idx, true,  colors, def));
+    def.outputs.forEach((port, idx) => this._addPort(group, node, port, idx, false, colors, def));
 
-    // ── Value display for constant chips ──────────────────────────────────
-    if (def.isConst) {
-      this._addValueDisplay(group, node);
-    }
+    if (def.isConst)      this._addValueDisplay(group, node, def, colors);
+    if (def.isRenameable) this._addRenameHandler(group, node, colors, def);
 
-    // ── Result badge (populated during eval animation) ─────────────────────
     group._resultBadges = [];
 
-    // ── Drag ───────────────────────────────────────────────────────────────
     group.on('dragmove', () => {
-      // Keep graph data in sync (moves node.x / node.y without emitting events
-      // that would fight the Konva drag)
       const n = this.graph.nodes.get(node.id);
       if (n) { n.x = group.x(); n.y = group.y(); }
       this._updateEdgesForNode(node.id);
       this.layer.batchDraw();
     });
 
-    group.on('dragend', () => {
-      this.graph.moveNode(node.id, group.x(), group.y());
-    });
+    group.on('dragend', () => { this.graph.moveNode(node.id, group.x(), group.y()); });
 
-    // ── Hover highlight ────────────────────────────────────────────────────
-    group.on('mouseenter', () => {
-      body.stroke('#6a6aaa');
-      this.layer.batchDraw();
-    });
-    group.on('mouseleave', () => {
-      body.stroke('#3a3a6a');
-      this.layer.batchDraw();
-    });
+    group.on('mouseenter', () => { body.stroke('#6a6aaa'); this.layer.batchDraw(); });
+    group.on('mouseleave', () => { body.stroke('#3a3a6a'); this.layer.batchDraw(); });
 
-    // ── Right-click to delete ──────────────────────────────────────────────
     group.on('contextmenu', e => {
       e.evt.preventDefault();
       this.graph.removeNode(node.id);
@@ -364,21 +283,15 @@ export class Renderer {
     return group;
   }
 
-  /** Value display + double-click edit for constant chips. */
-  _addValueDisplay(group, node) {
-    const def     = CHIP_TYPES[node.type];
+  _addValueDisplay(group, node, def, colors) {
     const outType = def.outputs[0]?.type;
-    const colors  = CATEGORY_COLORS[def.category] ?? DEFAULT_COLORS;
 
     const valText = new Konva.Text({
       x: 8, y: HEADER_H + PORT_PAD - 2,
       width: CHIP_W - PORT_R - 16,
       text: String(node.props.value),
-      fontSize: 20,
-      fontFamily: 'Consolas, monospace',
-      fill: colors.portColor,
-      align: 'center',
-      listening: false,
+      fontSize: 20, fontFamily: 'Consolas, monospace',
+      fill: colors.portColor, align: 'center', listening: false,
     });
     group.add(valText);
     group._valText = valText;
@@ -387,25 +300,29 @@ export class Renderer {
       if (outType === T.bool) {
         this.graph.updateNodeProps(node.id, { value: !node.props.value });
       } else {
-        this._showValueEditor(node, outType, colors);
+        this._showValueEditor(node, outType, colors, def);
       }
     });
   }
 
-  /** Sync the display of a chip when its props change (e.g. Number value). */
+  _addRenameHandler(group, node, colors, def) {
+    group.on('dblclick dbltap', () => this._showNameEditor(node, colors, def));
+  }
+
   _refreshChipDisplay(node) {
     const group = this._chipShapes.get(node.id);
     if (!group) return;
-    if (group._valText) {
-      group._valText.text(String(node.props.value));
+    if (group._valText) group._valText.text(String(node.props.value));
+    const def = this._getDef(node.type);
+    if (def.titleFromProps && group._titleText) {
+      group._titleText.text(node.props[def.titleFromProps] || def.label);
     }
   }
 
-  _showValueEditor(node, outType, colors) {
+  _showValueEditor(node, outType, colors, def) {
     const container = this.stage.container();
     const rect      = container.getBoundingClientRect();
     const scale     = this.world.scaleX();
-
     const sx = rect.left + this.world.x() + node.x * scale;
     const sy = rect.top  + this.world.y() + (node.y + HEADER_H) * scale;
 
@@ -414,7 +331,7 @@ export class Renderer {
     input.value = String(node.props.value);
     Object.assign(input.style, {
       position: 'fixed', left: `${sx}px`, top: `${sy}px`,
-      width: `${CHIP_W * scale}px`, height: `${chipBodyH(node.type) * scale}px`,
+      width: `${CHIP_W * scale}px`, height: `${chipBodyH(def) * scale}px`,
       background: '#111122', color: colors?.portColor ?? '#a8ffc0',
       border: `2px solid ${colors?.portColor ?? '#50c080'}`, borderRadius: '0 0 7px 7px',
       fontSize: `${20 * scale}px`, fontFamily: 'Consolas, monospace',
@@ -435,14 +352,12 @@ export class Renderer {
 
     let done = false;
     const commit = () => {
-      if (done) return;
-      done = true;
+      if (done) return; done = true;
       const val = parse(input.value);
       if (!isNaN(val)) this.graph.updateNodeProps(node.id, { value: val });
       input.remove();
     };
     const cancel = () => { if (done) return; done = true; input.remove(); };
-
     input.addEventListener('keydown', e => {
       if (e.key === 'Enter')  { e.preventDefault(); commit(); }
       if (e.key === 'Escape') { e.preventDefault(); cancel(); }
@@ -450,73 +365,88 @@ export class Renderer {
     input.addEventListener('blur', commit);
   }
 
-  // ── Port ──────────────────────────────────────────────────────────────────
+  _showNameEditor(node, colors, def) {
+    const container = this.stage.container();
+    const rect      = container.getBoundingClientRect();
+    const scale     = this.world.scaleX();
+    const sx = rect.left + this.world.x() + node.x * scale;
+    const sy = rect.top  + this.world.y() + (node.y + HEADER_H) * scale;
 
-  _addPort(group, node, port, idx, isInput, colors) {
-    const relX  = isInput ? 0 : CHIP_W;
-    const relY  = portRelY(idx);
+    const input = document.createElement('input');
+    input.type  = 'text';
+    input.value = String(node.props.name ?? '');
+    Object.assign(input.style, {
+      position: 'fixed', left: `${sx}px`, top: `${sy}px`,
+      width: `${CHIP_W * scale}px`, height: `${chipBodyH(def) * scale}px`,
+      background: '#111122', color: colors?.portColor ?? '#a0a0ff',
+      border: `2px solid ${colors?.portColor ?? '#a0a0ff'}`, borderRadius: '0 0 7px 7px',
+      fontSize: `${14 * scale}px`, fontFamily: 'Segoe UI, system-ui, sans-serif',
+      textAlign: 'center', padding: '0', outline: 'none',
+      zIndex: '1000', boxSizing: 'border-box',
+    });
+    document.body.appendChild(input);
+    input.focus();
+    input.select();
+
+    let done = false;
+    const commit = () => {
+      if (done) return; done = true;
+      const name = input.value.trim();
+      if (name) this.graph.updateNodeProps(node.id, { name });
+      input.remove();
+    };
+    const cancel = () => { if (done) return; done = true; input.remove(); };
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); commit(); }
+      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+    input.addEventListener('blur', commit);
+  }
+
+  // ── Port ──────────────────────────────────────────────────────────────────────
+
+  _addPort(group, node, port, idx, isInput, colors, def) {
+    const relX = isInput ? 0 : CHIP_W;
+    const relY = portRelY(idx);
     const portColor = (port.type && WIRE_STYLE[port.type])
       ? WIRE_STYLE[port.type].color
-      : (port.type === 'any' ? '#c0c0c0' : (colors.portColor ?? PORT_DEFAULT_FILL));
+      : (port.type === 'any' ? '#c0c0c0' : (colors.portColor ?? '#7070bb'));
 
-    // Label
     group.add(new Konva.Text({
-      x:     isInput ? PORT_HIT_R + 4 : CHIP_W - PORT_HIT_R - 74,
-      y:     relY - 7,
-      width: 70,
-      text:  port.name,
-      fontSize: 10,
-      fontFamily: 'Segoe UI, system-ui, sans-serif',
-      fill: '#9090c0',
-      align: isInput ? 'left' : 'right',
-      listening: false,
+      x: isInput ? PORT_HIT_R + 4 : CHIP_W - PORT_HIT_R - 74,
+      y: relY - 7, width: 70, text: port.name,
+      fontSize: 10, fontFamily: 'Segoe UI, system-ui, sans-serif',
+      fill: '#9090c0', align: isInput ? 'left' : 'right', listening: false,
     }));
 
-    // Visible dot
     const dot = new Konva.Circle({
-      x: relX, y: relY,
-      radius: PORT_R,
-      fill: portColor,
-      stroke: '#20204a',
-      strokeWidth: 1.5,
-      listening: false,
+      x: relX, y: relY, radius: PORT_R,
+      fill: portColor, stroke: '#20204a', strokeWidth: 1.5, listening: false,
     });
     group.add(dot);
 
-    // Larger invisible hit area on top
     const hit = new Konva.Circle({
-      x: relX, y: relY,
-      radius: PORT_HIT_R,
-      fill: 'transparent',
-      listening: true,
+      x: relX, y: relY, radius: PORT_HIT_R, fill: 'transparent', listening: true,
     });
     hit._portInfo = { nodeId: node.id, portName: port.name, isInput };
     group.add(hit);
 
-    // ── Wire drawing interactions ──────────────────────────────────────────
-
     hit.on('mousedown', e => {
-      e.cancelBubble = true;              // don't start chip drag
-      // Disable dragging on ALL chips while drawing a wire
+      e.cancelBubble = true;
       for (const g of this._chipShapes.values()) g.draggable(false);
-
-      const worldPos = portWorldPos(node, port.name, isInput);
+      const worldPos = portWorldPos(node, port.name, isInput, def);
       this._startWire(node.id, port.name, isInput, worldPos.x, worldPos.y);
     });
 
     hit.on('mouseup', e => {
-      e.cancelBubble = true;              // don't trigger stage mouseup cancel
+      e.cancelBubble = true;
       for (const g of this._chipShapes.values()) g.draggable(true);
-
-      if (this._pendingWire) {
-        this._finishWire(node.id, port.name, isInput);
-      }
+      if (this._pendingWire) this._finishWire(node.id, port.name, isInput);
     });
 
     hit.on('mouseenter', () => {
       if (this._pendingWire) {
-        const ok = this._pendingWireCompatible(node.id, port.name, isInput);
-        dot.fill(ok ? '#60e080' : '#e04040');
+        dot.fill(this._pendingWireCompatible(node.id, port.name, isInput) ? '#60e080' : '#e04040');
       } else {
         dot.fill(PORT_HOVER_FILL);
       }
@@ -530,22 +460,17 @@ export class Renderer {
     });
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Edge (wire) rendering
-  // ────────────────────────────────────────────────────────────────────────────
+  // ── Edge (wire) rendering ──────────────────────────────────────────────────────
 
   _renderEdge(edge) {
     const { x: x1, y: y1 } = this._nodePortWorldPos(edge.fromNode, edge.fromPort, false);
     const { x: x2, y: y2 } = this._nodePortWorldPos(edge.toNode,   edge.toPort,   true);
-    const style = wireStyle(edge.fromNode, edge.fromPort, this.graph);
+    const style = this._wireStyle(edge.fromNode, edge.fromPort);
 
     const path = new Konva.Path({
-      data:           bezierPath(x1, y1, x2, y2),
-      stroke:         style.color,
-      strokeWidth:    style.strokeWidth,
-      lineCap:        'round',
-      listening:      true,
-      hitStrokeWidth: 10,
+      data: bezierPath(x1, y1, x2, y2),
+      stroke: style.color, strokeWidth: style.strokeWidth,
+      lineCap: 'round', listening: true, hitStrokeWidth: 10,
     });
     path._edgeId    = edge.id;
     path._baseStyle = style;
@@ -555,7 +480,6 @@ export class Renderer {
       this.layer.batchDraw();
       setTimeout(() => this.graph.removeEdge(edge.id), 180);
     });
-
     path.on('mouseenter', () => {
       path.stroke(WIRE_HOVER_COLOR);
       path.strokeWidth(style.strokeWidth + 1);
@@ -571,7 +495,6 @@ export class Renderer {
     this._wireShapes.set(edge.id, path);
   }
 
-  /** Redraw all wires connected to a node (called during chip drag). */
   _updateEdgesForNode(nodeId) {
     for (const edge of this.graph.edgesForNode(nodeId)) {
       const path = this._wireShapes.get(edge.id);
@@ -597,26 +520,21 @@ export class Renderer {
     if (g) g.position({ x: node.x, y: node.y });
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Wire drawing state machine
-  // ────────────────────────────────────────────────────────────────────────────
+  // ── Wire drawing state machine ─────────────────────────────────────────────────
 
   _startWire(nodeId, portName, isInput, wx, wy) {
     if (this._tempWirePath) this._tempWirePath.destroy();
-
     this._pendingWire = { nodeId, portName, isInput, x: wx, y: wy };
 
-    const def   = CHIP_TYPES[this.graph.nodes.get(nodeId)?.type];
+    const def   = this._getDef(this.graph.nodes.get(nodeId)?.type);
     const ports = isInput ? def?.inputs : def?.outputs;
     const ptype = ports?.find(p => p.name === portName)?.type;
     const style = (ptype && WIRE_STYLE[ptype]) ? WIRE_STYLE[ptype] : WIRE_STYLE_DEFAULT;
 
     this._tempWirePath = new Konva.Path({
-      data:        bezierPath(wx, wy, wx, wy),
-      stroke:      style.color,
-      strokeWidth: style.strokeWidth,
-      dash:        [7, 5],
-      listening:   false,
+      data: bezierPath(wx, wy, wx, wy),
+      stroke: style.color, strokeWidth: style.strokeWidth,
+      dash: [7, 5], listening: false,
     });
     this.wireGroup.add(this._tempWirePath);
     this.layer.batchDraw();
@@ -624,25 +542,22 @@ export class Renderer {
 
   _finishWire(targetNodeId, targetPortName, targetIsInput) {
     const src = this._pendingWire;
-    this._cancelWire();                     // clears pending state first
-
-    if (src.nodeId === targetNodeId) return; // same chip — skip
+    this._cancelWire();
+    if (src.nodeId === targetNodeId) return;
 
     let fromNode, fromPort, toNode, toPort;
-
     if (!src.isInput && targetIsInput) {
-      fromNode = src.nodeId;    fromPort = src.portName;
-      toNode   = targetNodeId;  toPort   = targetPortName;
+      fromNode = src.nodeId; fromPort = src.portName;
+      toNode = targetNodeId; toPort = targetPortName;
     } else if (src.isInput && !targetIsInput) {
-      fromNode = targetNodeId;  fromPort = targetPortName;
-      toNode   = src.nodeId;    toPort   = src.portName;
+      fromNode = targetNodeId; fromPort = targetPortName;
+      toNode = src.nodeId;   toPort = src.portName;
     } else {
       return;
     }
 
-    // Type compatibility check
-    const fromDef = CHIP_TYPES[this.graph.nodes.get(fromNode)?.type];
-    const toDef   = CHIP_TYPES[this.graph.nodes.get(toNode)?.type];
+    const fromDef  = this._getDef(this.graph.nodes.get(fromNode)?.type);
+    const toDef    = this._getDef(this.graph.nodes.get(toNode)?.type);
     const fromType = fromDef?.outputs.find(p => p.name === fromPort)?.type;
     const toType   = toDef?.inputs.find(p => p.name === toPort)?.type;
 
@@ -656,10 +571,7 @@ export class Renderer {
 
   _cancelWire() {
     this._pendingWire = null;
-    if (this._tempWirePath) {
-      this._tempWirePath.destroy();
-      this._tempWirePath = null;
-    }
+    if (this._tempWirePath) { this._tempWirePath.destroy(); this._tempWirePath = null; }
     for (const g of this._chipShapes.values()) g.draggable(true);
     this.layer.batchDraw();
   }
@@ -677,17 +589,17 @@ export class Renderer {
 
     let fromNode, fromPort, toNode, toPort;
     if (!src.isInput && targetIsInput) {
-      fromNode = src.nodeId;   fromPort = src.portName;
-      toNode   = targetNodeId; toPort   = targetPortName;
+      fromNode = src.nodeId; fromPort = src.portName;
+      toNode = targetNodeId; toPort = targetPortName;
     } else if (src.isInput && !targetIsInput) {
       fromNode = targetNodeId; fromPort = targetPortName;
-      toNode   = src.nodeId;   toPort   = src.portName;
+      toNode = src.nodeId;   toPort = src.portName;
     } else {
       return false;
     }
 
-    const fromDef  = CHIP_TYPES[this.graph.nodes.get(fromNode)?.type];
-    const toDef    = CHIP_TYPES[this.graph.nodes.get(toNode)?.type];
+    const fromDef  = this._getDef(this.graph.nodes.get(fromNode)?.type);
+    const toDef    = this._getDef(this.graph.nodes.get(toNode)?.type);
     const fromType = fromDef?.outputs.find(p => p.name === fromPort)?.type;
     const toType   = toDef?.inputs.find(p => p.name === toPort)?.type;
 
@@ -695,19 +607,12 @@ export class Renderer {
     return typesCompatible(fromType, toType);
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Eval animation
-  // ────────────────────────────────────────────────────────────────────────────
+  // ── Eval animation ─────────────────────────────────────────────────────────────
 
-  /**
-   * Called after evaluation. Animates wires and shows output values on chips.
-   * @param {{ [nodeId: string]: { [portName: string]: any } }} results
-   */
   showEvalResults(results) {
-    const FLASH_MS  = 500;
-    const BADGE_MS  = 2500;
+    const FLASH_MS = 500;
+    const BADGE_MS = 2500;
 
-    // Animate wires first
     for (const path of this._wireShapes.values()) {
       path.stroke(WIRE_ANIM_COLOR);
       path.strokeWidth(path._baseStyle.strokeWidth + 1);
@@ -719,80 +624,54 @@ export class Renderer {
       }, FLASH_MS);
     }
 
-    // Animate chips and show result badges
     for (const [nodeId, outputs] of Object.entries(results)) {
       const group = this._chipShapes.get(nodeId);
       if (!group) continue;
 
-      // Flash the chip body
       const origFill = group._body.fill();
       group._body.fill('#1a3a2a');
       setTimeout(() => { group._body.fill(origFill); this.layer.batchDraw(); }, FLASH_MS);
 
-      // Show output value badges
       const node = this.graph.nodes.get(nodeId);
-      const def  = CHIP_TYPES[node.type];
+      const def  = this._getDef(node.type);
 
       for (const [portName, value] of Object.entries(outputs)) {
+        if (portName.startsWith('_')) continue;
         const idx = def.outputs.findIndex(p => p.name === portName);
         if (idx < 0) continue;
 
-        const relY = portRelY(idx);
-
-        // Remove any existing badge for this port
         group._resultBadges.forEach(b => b.destroy());
         group._resultBadges = [];
 
-        const badge = new Konva.Label({ x: CHIP_W + 12, y: relY - 11 });
-        badge.add(new Konva.Tag({
-          fill:         '#0a2a1a',
-          stroke:       '#30804a',
-          strokeWidth:  1,
-          cornerRadius: 3,
-        }));
+        const badge = new Konva.Label({ x: CHIP_W + 12, y: portRelY(idx) - 11 });
+        badge.add(new Konva.Tag({ fill: '#0a2a1a', stroke: '#30804a', strokeWidth: 1, cornerRadius: 3 }));
         badge.add(new Konva.Text({
-          text:       String(value),
-          fontSize:   11,
-          fontFamily: 'Consolas, monospace',
-          fill:       '#80ffa8',
-          padding:    4,
+          text: fmtValue(value), fontSize: 11,
+          fontFamily: 'Consolas, monospace', fill: '#80ffa8', padding: 4,
         }));
-
         group.add(badge);
         group._resultBadges.push(badge);
-
-        setTimeout(() => {
-          badge.destroy();
-          this.layer.batchDraw();
-        }, BADGE_MS);
+        setTimeout(() => { badge.destroy(); this.layer.batchDraw(); }, BADGE_MS);
       }
     }
 
     this.layer.batchDraw();
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // Coordinate utilities
-  // ────────────────────────────────────────────────────────────────────────────
+  // ── Coordinate utilities ────────────────────────────────────────────────────────
 
-  /** Convert screen coordinates to world coordinates. */
   screenToWorld(sx, sy) {
     const scale = this.world.scaleX();
-    return {
-      x: (sx - this.world.x()) / scale,
-      y: (sy - this.world.y()) / scale,
-    };
+    return { x: (sx - this.world.x()) / scale, y: (sy - this.world.y()) / scale };
   }
 
-  /** World-space centre of the current viewport. Useful for placing new chips. */
   viewportCenter() {
     return this.screenToWorld(this.stage.width() / 2, this.stage.height() / 2);
   }
 
-  // ── Private helpers ────────────────────────────────────────────────────────
-
   _nodePortWorldPos(nodeId, portName, isInput) {
     const node = this.graph.nodes.get(nodeId);
-    return portWorldPos(node, portName, isInput);
+    const def  = this._getDef(node.type);
+    return portWorldPos(node, portName, isInput, def);
   }
 }

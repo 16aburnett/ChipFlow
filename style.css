@@ -68,6 +68,51 @@ body {
   border-color: transparent;
 }
 
+.palette-chip-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.palette-chip-row .palette-chip-btn {
+  flex: 1;
+}
+
+.palette-edit-btn {
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  color: #a0a0d0;
+  background: #1a1a38;
+  border-color: #3a3a5a;
+  flex-shrink: 0;
+}
+
+.palette-edit-btn:hover {
+  background: #2a2a50;
+  color: #e0e0ff;
+}
+
+.palette-icon-btn {
+  padding: 4px 6px;
+  font-size: 0.78rem;
+  color: #7070a0;
+  background: transparent;
+  border-color: transparent;
+  flex-shrink: 0;
+}
+
+.palette-icon-btn:hover {
+  background: #2a2a50;
+  color: #c0c0e0;
+  border-color: #3a3a5a;
+}
+
+.palette-delete-btn:hover {
+  color: #ff7070;
+  background: #3a1a1a;
+  border-color: #5a2a2a;
+}
+
 /* ── Toolbar ─────────────────────────────────────────────────────────────── */
 
 #toolbar {
@@ -150,6 +195,62 @@ button:hover {
   border-color: #3d9a58;
 }
 
+/* ── Tab bar ──────────────────────────────────────────────────────────────── */
+
+#tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 12px;
+  height: 34px;
+  background: #0e0e22;
+  border-bottom: 1px solid #2a2a4a;
+  flex-shrink: 0;
+  user-select: none;
+  overflow-x: auto;
+}
+
+.tab {
+  padding: 4px 16px;
+  border-radius: 5px 5px 0 0;
+  font-size: 0.82rem;
+  cursor: pointer;
+  color: #7070a0;
+  border: 1px solid transparent;
+  border-bottom: none;
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s;
+}
+
+.tab:hover { color: #c0c0e0; background: #1a1a38; }
+
+.tab.active {
+  color: #e0e0ff;
+  background: #1a1a2e;
+  border-color: #3a3a5a;
+}
+
+.tab-close {
+  margin-left: 6px;
+  font-size: 0.75rem;
+  color: #5050a0;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.tab-close:hover { color: #ff7070; }
+
+#btn-new-chip {
+  margin-left: 4px;
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  background: transparent;
+  border-color: #3a3a6a;
+  color: #c080e0;
+}
+
+#btn-new-chip:hover { background: #2a1a3a; border-color: #c080e0; }
+
 /* ── Canvas ──────────────────────────────────────────────────────────────── */
 
 #canvas-container {
@@ -157,11 +258,8 @@ button:hover {
   overflow: hidden;
   min-height: 0;
   cursor: default;
-  background:
-    radial-gradient(circle, #1e1e36 0%, #14142a 100%);
-  background-image:
-    /* dot-grid */
-    radial-gradient(circle, #2a2a4a 1px, transparent 1px);
+  background: radial-gradient(circle, #1e1e36 0%, #14142a 100%);
+  background-image: radial-gradient(circle, #2a2a4a 1px, transparent 1px);
   background-size: 28px 28px;
 }
 
