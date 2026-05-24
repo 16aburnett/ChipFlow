@@ -30,7 +30,8 @@ const constChip = (type, defaultVal) => ({
   label: type, category: 'value',
   inputs:  [],
   outputs: [{ name: 'value', type }],
-  defaultProps: { value: defaultVal },
+  defaultProps: { value: defaultVal, name: '' },
+  titleFromProps: 'name',
   eval(_i, props) { return { value: props.value }; },
 });
 

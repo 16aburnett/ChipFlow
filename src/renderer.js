@@ -262,7 +262,16 @@ export class Renderer {
     def.inputs.forEach((port, idx)  => this._addPort(group, node, resolvePort(port), idx, true,  colors, def));
     def.outputs.forEach((port, idx) => this._addPort(group, node, resolvePort(port), idx, false, colors, def));
 
-    if (def.isConst)      this._addValueDisplay(group, node, def, colors);
+    if (def.isConst) {
+      this._addValueDisplay(group, node, def, colors);
+      const pencil = new Konva.Text({
+        x: CHIP_W - 18, y: 8, text: '✎',
+        fontSize: 11, fill: '#ffffff', opacity: 0, listening: false,
+      });
+      group.add(pencil);
+      group.on('mouseover', () => { pencil.opacity(0.5); this.layer.batchDraw(); });
+      group.on('mouseout',  () => { pencil.opacity(0);   this.layer.batchDraw(); });
+    }
     if (def.isRenameable) this._addRenameHandler(group, node, colors, def);
 
     group._resultBadges = [];
@@ -301,12 +310,19 @@ export class Renderer {
     group._valText = valText;
 
     group.on('dblclick dbltap', () => {
-      if (outType === T.bool) {
-        this.graph.updateNodeProps(node.id, { value: !node.props.value });
-      } else {
-        this._showValueEditor(node, outType, colors, def);
-      }
+      this._showValueEditor(node, outType, colors, def);
     });
+
+    if (outType === T.bool) {
+      let clickTimer = null;
+      group.on('click tap', () => {
+        if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; return; }
+        clickTimer = setTimeout(() => {
+          clickTimer = null;
+          this.graph.updateNodeProps(node.id, { value: !node.props.value });
+        }, 220);
+      });
+    }
   }
 
   _addRenameHandler(group, node, colors, def) {
@@ -343,22 +359,63 @@ export class Renderer {
     const scale     = this.world.scaleX();
     const sx = rect.left + this.world.x() + node.x * scale;
     const sy = rect.top  + this.world.y() + (node.y + HEADER_H) * scale;
+    const accent = colors?.portColor ?? '#50c080';
 
-    const input = document.createElement('input');
-    input.type  = 'text';
-    input.value = String(node.props.value);
-    Object.assign(input.style, {
+    const popup = document.createElement('div');
+    Object.assign(popup.style, {
       position: 'fixed', left: `${sx}px`, top: `${sy}px`,
-      width: `${CHIP_W * scale}px`, height: `${chipBodyH(def) * scale}px`,
-      background: '#111122', color: colors?.portColor ?? '#a8ffc0',
-      border: `2px solid ${colors?.portColor ?? '#50c080'}`, borderRadius: '0 0 7px 7px',
-      fontSize: `${20 * scale}px`, fontFamily: 'Consolas, monospace',
-      textAlign: 'center', padding: '0', outline: 'none',
-      zIndex: '1000', boxSizing: 'border-box',
+      width: `${CHIP_W * scale}px`,
+      background: '#111122', border: `2px solid ${accent}`, borderRadius: '0 0 7px 7px',
+      zIndex: '1000', boxSizing: 'border-box', display: 'flex',
+      flexDirection: 'column', gap: '4px', padding: '6px',
     });
-    document.body.appendChild(input);
-    input.focus();
-    input.select();
+
+    const isBool = outType === T.bool;
+    let valSelect = null;
+    let valInput  = null;
+
+    if (isBool) {
+      valSelect = document.createElement('select');
+      Object.assign(valSelect.style, {
+        width: '100%', background: '#1a1a30', color: accent,
+        border: 'none', outline: 'none',
+        fontSize: `${Math.max(14, 18 * scale)}px`, fontFamily: 'Consolas, monospace',
+        textAlign: 'center', padding: '2px 0', boxSizing: 'border-box',
+      });
+      for (const v of ['false', 'true']) {
+        const opt = document.createElement('option');
+        opt.value = v; opt.textContent = v;
+        if (String(node.props.value) === v) opt.selected = true;
+        valSelect.appendChild(opt);
+      }
+      popup.appendChild(valSelect);
+    } else {
+      valInput = document.createElement('input');
+      valInput.type  = 'text';
+      valInput.value = String(node.props.value);
+      Object.assign(valInput.style, {
+        width: '100%', background: 'transparent', color: accent,
+        border: 'none', outline: 'none',
+        fontSize: `${Math.max(14, 18 * scale)}px`, fontFamily: 'Consolas, monospace',
+        textAlign: 'center', padding: '2px 0', boxSizing: 'border-box',
+      });
+      popup.appendChild(valInput);
+    }
+
+    const nameInput = document.createElement('input');
+    nameInput.type        = 'text';
+    nameInput.value       = String(node.props.name ?? '');
+    nameInput.placeholder = 'label (optional)';
+    Object.assign(nameInput.style, {
+      width: '100%', background: 'transparent', color: '#7070a0',
+      border: 'none', borderTop: `1px solid #2a2a4a`, outline: 'none',
+      fontSize: `${Math.max(10, 11 * scale)}px`, fontFamily: 'Segoe UI, system-ui, sans-serif',
+      textAlign: 'center', padding: '2px 0', boxSizing: 'border-box',
+    });
+    popup.appendChild(nameInput);
+
+    document.body.appendChild(popup);
+    if (isBool) { valSelect.focus(); } else { valInput.focus(); valInput.select(); }
 
     const parse = raw => {
       if (outType === T.u8)  return Math.max(0, Math.min(255, parseInt(raw) || 0));
@@ -371,16 +428,22 @@ export class Renderer {
     let done = false;
     const commit = () => {
       if (done) return; done = true;
-      const val = parse(input.value);
-      if (!isNaN(val)) this.graph.updateNodeProps(node.id, { value: val });
-      input.remove();
+      const val  = isBool ? (valSelect.value === 'true') : parse(valInput.value);
+      const name = nameInput.value.trim();
+      if (isBool || !isNaN(val)) this.graph.updateNodeProps(node.id, { value: val, name });
+      popup.remove();
     };
-    const cancel = () => { if (done) return; done = true; input.remove(); };
-    input.addEventListener('keydown', e => {
-      if (e.key === 'Enter')  { e.preventDefault(); commit(); }
-      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    const cancel = () => { if (done) return; done = true; popup.remove(); };
+    const keyInputs = isBool ? [valSelect, nameInput] : [valInput, nameInput];
+    for (const el of keyInputs) {
+      el.addEventListener('keydown', e => {
+        if (e.key === 'Enter')  { e.preventDefault(); commit(); }
+        if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+      });
+    }
+    popup.addEventListener('focusout', e => {
+      if (!popup.contains(e.relatedTarget)) commit();
     });
-    input.addEventListener('blur', commit);
   }
 
   _showNameEditor(node, colors, def) {
