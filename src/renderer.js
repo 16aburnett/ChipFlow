@@ -225,9 +225,8 @@ export class Renderer {
     const def    = this._getDef(node.type);
     const colors = CATEGORY_COLORS[def.category] ?? DEFAULT_COLORS;
     const totalH = chipH(def);
-    const title  = def.titleFromProps
-      ? (node.props[def.titleFromProps] || def.label)
-      : def.label;
+    const baseName = def.titleFromProps ? (node.props[def.titleFromProps] || def.label) : def.label;
+    const title    = (def.titlePrefix ?? '') + baseName + (def.titleSuffix ?? '');
 
     const group = new Konva.Group({ x: node.x, y: node.y, draggable: true });
     group._chipNodeId = node.id;
@@ -311,6 +310,13 @@ export class Renderer {
   }
 
   _addRenameHandler(group, node, colors, def) {
+    const pencil = new Konva.Text({
+      x: CHIP_W - 18, y: 8, text: '✎',
+      fontSize: 11, fill: '#ffffff', opacity: 0, listening: false,
+    });
+    group.add(pencil);
+    group.on('mouseover', () => { pencil.opacity(0.5); this.layer.batchDraw(); });
+    group.on('mouseout',  () => { pencil.opacity(0);   this.layer.batchDraw(); });
     group.on('dblclick dbltap', () => this._showNameEditor(node, colors, def));
   }
 
