@@ -52,13 +52,13 @@ export class ChipLibrary {
         const portName = node.props.name || 'in';
         if (inNames.has(portName)) console.warn(`[ChipFlow] Chip "${name}" has duplicate input port "${portName}"`);
         inNames.add(portName);
-        inputs.push({ name: portName, type: 'any' });
+        inputs.push({ name: portName, type: node.props.type ?? 'any' });
       }
       if (node.type === 'ChipOut') {
         const portName = node.props.name || 'out';
         if (outNames.has(portName)) console.warn(`[ChipFlow] Chip "${name}" has duplicate output port "${portName}"`);
         outNames.add(portName);
-        outputs.push({ name: portName, type: 'any' });
+        outputs.push({ name: portName, type: node.props.type ?? 'any' });
       }
     }
     return {

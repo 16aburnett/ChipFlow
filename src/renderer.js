@@ -119,8 +119,10 @@ export class Renderer {
     const node = this.graph?.nodes.get(fromNodeId);
     if (!node) return WIRE_STYLE_DEFAULT;
     const def  = this._getDef(node.type);
-    const port = def?.outputs.find(p => p.name === fromPort);
-    return (port?.type && WIRE_STYLE[port.type]) ? WIRE_STYLE[port.type] : WIRE_STYLE_DEFAULT;
+    const type = def?.typeFromProps
+      ? (node.props[def.typeFromProps] ?? 'any')
+      : def?.outputs.find(p => p.name === fromPort)?.type;
+    return (type && WIRE_STYLE[type]) ? WIRE_STYLE[type] : WIRE_STYLE_DEFAULT;
   }
 
   // ── Setup ──────────────────────────────────────────────────────────────────────
@@ -255,8 +257,11 @@ export class Renderer {
     group.add(titleText);
     group._titleText = titleText;
 
-    def.inputs.forEach((port, idx)  => this._addPort(group, node, port, idx, true,  colors, def));
-    def.outputs.forEach((port, idx) => this._addPort(group, node, port, idx, false, colors, def));
+    const resolvePort = def.typeFromProps
+      ? p => ({ ...p, type: node.props[def.typeFromProps] ?? 'any' })
+      : p => p;
+    def.inputs.forEach((port, idx)  => this._addPort(group, node, resolvePort(port), idx, true,  colors, def));
+    def.outputs.forEach((port, idx) => this._addPort(group, node, resolvePort(port), idx, false, colors, def));
 
     if (def.isConst)      this._addValueDisplay(group, node, def, colors);
     if (def.isRenameable) this._addRenameHandler(group, node, colors, def);
@@ -312,8 +317,15 @@ export class Renderer {
   _refreshChipDisplay(node) {
     const group = this._chipShapes.get(node.id);
     if (!group) return;
-    if (group._valText) group._valText.text(String(node.props.value));
     const def = this._getDef(node.type);
+    if (def.typeFromProps) {
+      group.destroy();
+      this._chipShapes.delete(node.id);
+      this._renderNode(node);
+      this._updateEdgesForNode(node.id);
+      return;
+    }
+    if (group._valText) group._valText.text(String(node.props.value));
     if (def.titleFromProps && group._titleText) {
       group._titleText.text(node.props[def.titleFromProps] || def.label);
     }
@@ -371,20 +383,47 @@ export class Renderer {
     const scale     = this.world.scaleX();
     const sx = rect.left + this.world.x() + node.x * scale;
     const sy = rect.top  + this.world.y() + (node.y + HEADER_H) * scale;
+    const accent = colors?.portColor ?? '#a0a0ff';
+
+    const hasType = !!def.typeFromProps;
+    const popup   = document.createElement('div');
+    Object.assign(popup.style, {
+      position: 'fixed', left: `${sx}px`, top: `${sy}px`,
+      width: `${CHIP_W * scale}px`,
+      background: '#111122', border: `2px solid ${accent}`, borderRadius: '0 0 7px 7px',
+      zIndex: '1000', boxSizing: 'border-box', display: 'flex',
+      flexDirection: 'column', gap: '4px', padding: '6px',
+    });
 
     const input = document.createElement('input');
     input.type  = 'text';
     input.value = String(node.props.name ?? '');
     Object.assign(input.style, {
-      position: 'fixed', left: `${sx}px`, top: `${sy}px`,
-      width: `${CHIP_W * scale}px`, height: `${chipBodyH(def) * scale}px`,
-      background: '#111122', color: colors?.portColor ?? '#a0a0ff',
-      border: `2px solid ${colors?.portColor ?? '#a0a0ff'}`, borderRadius: '0 0 7px 7px',
-      fontSize: `${14 * scale}px`, fontFamily: 'Segoe UI, system-ui, sans-serif',
-      textAlign: 'center', padding: '0', outline: 'none',
-      zIndex: '1000', boxSizing: 'border-box',
+      width: '100%', background: 'transparent', color: accent,
+      border: 'none', borderBottom: `1px solid ${accent}`, outline: 'none',
+      fontSize: `${Math.max(11, 13 * scale)}px`, fontFamily: 'Segoe UI, system-ui, sans-serif',
+      textAlign: 'center', padding: '2px 0', boxSizing: 'border-box',
     });
-    document.body.appendChild(input);
+    popup.appendChild(input);
+
+    let select = null;
+    if (hasType) {
+      select = document.createElement('select');
+      Object.assign(select.style, {
+        width: '100%', background: '#1a1a30', color: accent,
+        border: `1px solid ${accent}`, borderRadius: '3px', outline: 'none',
+        fontSize: `${Math.max(10, 12 * scale)}px`, padding: '2px', boxSizing: 'border-box',
+      });
+      for (const t of ['any', 'bool', 'i32', 'i64', 'f32', 'f64']) {
+        const opt = document.createElement('option');
+        opt.value = t; opt.textContent = t;
+        if (t === (node.props[def.typeFromProps] ?? 'any')) opt.selected = true;
+        select.appendChild(opt);
+      }
+      popup.appendChild(select);
+    }
+
+    document.body.appendChild(popup);
     input.focus();
     input.select();
 
@@ -392,15 +431,26 @@ export class Renderer {
     const commit = () => {
       if (done) return; done = true;
       const name = input.value.trim();
-      if (name) this.graph.updateNodeProps(node.id, { name });
-      input.remove();
+      const props = {};
+      if (name) props.name = name;
+      if (hasType) props.type = select.value;
+      if (Object.keys(props).length) this.graph.updateNodeProps(node.id, props);
+      popup.remove();
     };
-    const cancel = () => { if (done) return; done = true; input.remove(); };
+    const cancel = () => { if (done) return; done = true; popup.remove(); };
     input.addEventListener('keydown', e => {
       if (e.key === 'Enter')  { e.preventDefault(); commit(); }
       if (e.key === 'Escape') { e.preventDefault(); cancel(); }
     });
-    input.addEventListener('blur', commit);
+    if (select) {
+      select.addEventListener('keydown', e => {
+        if (e.key === 'Enter')  { e.preventDefault(); commit(); }
+        if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+      });
+    }
+    popup.addEventListener('focusout', e => {
+      if (!popup.contains(e.relatedTarget)) commit();
+    });
   }
 
   // ── Port ──────────────────────────────────────────────────────────────────────
@@ -556,12 +606,18 @@ export class Renderer {
       return;
     }
 
-    const fromDef  = this._getDef(this.graph.nodes.get(fromNode)?.type);
-    const toDef    = this._getDef(this.graph.nodes.get(toNode)?.type);
-    const fromType = fromDef?.outputs.find(p => p.name === fromPort)?.type;
-    const toType   = toDef?.inputs.find(p => p.name === toPort)?.type;
+    const fromNodeObj = this.graph.nodes.get(fromNode);
+    const toNodeObj   = this.graph.nodes.get(toNode);
+    const fromDef  = this._getDef(fromNodeObj?.type);
+    const toDef    = this._getDef(toNodeObj?.type);
+    const fromType = fromDef?.typeFromProps
+      ? (fromNodeObj.props[fromDef.typeFromProps] ?? 'any')
+      : fromDef?.outputs.find(p => p.name === fromPort)?.type;
+    const toType   = toDef?.typeFromProps
+      ? (toNodeObj.props[toDef.typeFromProps] ?? 'any')
+      : toDef?.inputs.find(p => p.name === toPort)?.type;
 
-    if (fromType && toType && toType !== 'any' && !typesCompatible(fromType, toType)) {
+    if (fromType && toType && toType !== 'any' && fromType !== 'any' && !typesCompatible(fromType, toType)) {
       this._flashIncompatible();
       return;
     }
